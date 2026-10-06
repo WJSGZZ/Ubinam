@@ -2,7 +2,7 @@
 
 # Ubinam
 
-**Where was this photo taken — and when? An agent skill that finds out, checks its answer against real map data, and shows its work.**
+**Show your agent a photo. It works out where it was taken, and when, and shows you the proof.**
 
 *Ubinam* is Latin for “where, exactly?”
 
@@ -12,84 +12,104 @@
 
 ---
 
-Hand your agent a photo, or a whole album, and ask where it was taken. Ubinam reads every sign and landmark, ranks candidate places with scripts, then verifies the best ones against satellite imagery, street-level photos, terrain and map databases. You get coordinates, an error radius, and a separate confidence level for country, city, street and building, plus the chain of evidence behind each one.
+Most AI geolocation gives you one confident guess. Ubinam works like an investigator. It reads every sign in the frame, lists every place that could fit, checks the best candidates against satellite imagery, street-level photos, elevation data and maps, and keeps only what holds up.
 
-It is a standard [Agent Skill](https://agentskills.io): one folder with `SKILL.md`, plain Python scripts and reference notes. It works in Claude Code, Codex, Cursor, Gemini CLI, OpenCode, GitHub Copilot and any agent that can read `SKILL.md` and run shell commands.
+What you get back:
 
-## Why Ubinam
+- **Coordinates with an error radius**: “within 30 m”, not just a city name.
+- **A confidence level for each step**: country, city, street, building and floor, each judged separately.
+- **The evidence**: annotated satellite images and side-by-side comparisons, each tied to a command that actually ran.
+- **An honest stop**: if the photo only supports “somewhere in this district”, that is the answer, along with what it would need to go further.
 
-- **It checks instead of guessing.** Every “verified” claim must point to a command that actually ran and the file it produced. Exclusions need evidence, and an error radius under 100 m needs two independent constraints. A script-enforced candidate board keeps the model from settling on the most famous place that looks similar.
-- **Geometry, not vibes.** It can estimate focal length from EXIF or vanishing points, measure distance and height against the horizon, compare building heights from their shadows on satellite imagery, resect the camera position from three or more known landmarks, bracket the exact spot on a road from the parallax between three landmarks, render mountain skylines from elevation data, match coastline shapes, and compute where the sun was.
-- **Whole albums, not just single shots.** It locates the easy photos first (the ones with readable signs), uses them to bound the area, then goes back to the hard ones. It can plot every shooting spot on one satellite map, ranked by confidence.
-- **When it was taken, too.** It uses sun and shadow math when there are shadows. When there aren't, it falls back to dated evidence: festival decorations, construction progress, historical weather, and how fast the light and crowds are changing. Esri Wayback gives every version of the satellite imagery since 2014 together with the date each image was actually captured, so a building's first appearance brackets the year; Sentinel-2 scenes every five days narrow construction and redevelopment down to the month. Geometric conclusions are reported separately from common-sense guesses.
-- **Ready for China, not just the West.** It includes AMap and Baidu place search, WGS84/GCJ-02/BD-09 conversion, lookup tables for licence plates, area codes and scripts, and a workflow for Baidu's street panoramas, where Google Street View has no coverage.
-- **Clean data sources.** It only uses official APIs or openly licensed data: Esri and Sentinel-2 imagery, Mapillary (CC BY-SA), OpenStreetMap, and the official Baidu, AMap and Google APIs with your own keys. It never scrapes undocumented endpoints.
-- **Second opinions built in.** [GeoCLIP](https://github.com/VicenteVivan/geo-clip) gives an independent coarse guess from the image alone, and [MegaLoc](https://github.com/gmberton/MegaLoc) ranks street-level candidates by visual place recognition.
-- **A quick mode for games.** For GeoGuessr-style rounds it reads, zooms, looks things up and commits to an answer, with a separate betting rule for distance-scored games.
+It is an [Agent Skill](https://agentskills.io): a folder of instructions and plain Python scripts. It works in Claude Code, Codex, Cursor, Gemini CLI, OpenCode and any agent that can read `SKILL.md` and run shell commands.
 
-## What it has done
+## Track record
 
-Real photos, scored only after the answer was frozen:
+Real photos. The answer was frozen before the truth was revealed.
 
-| Photo | Result |
+| The photo | What Ubinam did |
 |---|---|
-| Hotel window view across a river, two bank logos readable | Resected from landmark positions; hotel identified, about 20 m off |
-| Traffic jam in Southeast Asia, one brand sign on a building | Company address led to the mall; street-level parallax put the camera about 30 m from the true spot |
-| Sunset over the sea, no text at all | Coastline-shape match picked the right bay and island; the GeoCLIP second opinion agreed |
-| Album of 14 city photos | 9 shooting spots pinned on one map; the hard lake shot was solved from a restaurant name reflected in the water |
-| Cable-stayed bridge at dusk, no text | **Missed by about 190 km**: picked the wrong one among several look-alike bridges (see Limits) |
+| A traffic jam in Southeast Asia, one brand sign on a building | Looked up the brand's branch address to find the mall, then pinned the camera **about 30 m** from where it really was |
+| A hotel window view across a river | Worked out the camera position from the landmarks in view and named the hotel, **about 20 m** off |
+| A sunset over the sea, no text anywhere | Matched the coastline's shape to find the right bay and island |
+| An album of 14 photos from one city | Pinned **12 of them** on one map and reported the other two as unplaced rather than guessing. A restaurant name **reflected in the water** in one night shot then cracked a separate lake photo that had no signs at all |
+| A cable-stayed bridge at dusk, no text | **Wrong by about 190 km**: it picked the wrong one of several look-alike bridges. We list our misses too |
 
-## How it works
+## What it can do
 
-| Layer | Who | Tools |
-|---|---|---|
-| **Decide**: which candidates, how to weigh evidence, what can be excluded, what to do next | scripts (candidate board) | `board.py` |
-| **Perceive**: read text, look up tables, rank satellite cells and street-level images | scripts rank, the model looks at the top few | `intake.py` `ocr.py` `clues.py` `poi.py` `sat_scan.py` `match.py` |
-| **Judge**: pull clues from the frame, propose hypotheses, choose among the ranked few | the model | `SKILL.md` + `references/` |
+**Find the place**
+- Reads shop signs, plates, phone numbers and street furniture, and looks them up in country tables.
+- Turns a brand name into a company or branch address, and a scene (“a bridge with a tower in view”) into a map query.
+- Ranks thousands of satellite tiles or street-level images automatically, so the model only inspects the top few.
 
-The full script list, data sources and licences are in [`skills/ubinam/references/data-sources.md`](skills/ubinam/references/data-sources.md). The skill instructions are written in Chinese; agents read them fine either way.
+**Pin the exact spot**
+- Works out the camera position from three or more landmarks it can identify on a map.
+- Narrows a spot on a road down to tens of metres from how near and far objects shift against each other.
+- Renders mountain skylines from elevation data and matches them to the photo.
+
+**Work out when**
+- Calculates the time and direction from shadows and the sun.
+- With no shadows, dates the photo from evidence: satellite imagery back to 2014 with real capture dates, Sentinel-2 scenes every five days for construction and redevelopment, festival decorations and historical weather.
+
+**Handle whole albums**
+- Solves the easy photos first, uses them to narrow the area, then goes back for the hard ones.
+- Plots every shooting spot on one map, with each photo shown beside its point.
+
+**Work in China too**
+- AMap and Baidu place search, conversion between China's three coordinate systems, and a workflow for Baidu panoramas where Google Street View has nothing.
+
+**Play GeoGuessr**
+- A quick mode that reads, zooms, looks up and commits, with a betting rule for distance-scored rounds.
+
+## Why you can trust the answer
+
+The rules that matter are enforced by scripts, not left to the model's good intentions:
+
+- **No made-up verification.** “Matched on street view” must point to a file produced in the same session.
+- **Ruling out a place takes the same evidence as confirming one.** A hunch can lower a candidate's rank but never remove it.
+- **Fame is not evidence.** The model cannot jump to the best-known place that looks similar. Every candidate goes on a scored board first.
+- **Precision has to be earned.** An error radius under 100 m needs two independent lines of evidence.
 
 ## Install
 
 ```bash
 git clone https://github.com/WJSGZZ/Ubinam
-cp -r ubinam/skills/ubinam ~/.agents/skills/              # Codex, Cursor, Gemini CLI, OpenCode, GitHub Copilot
+cp -r Ubinam/skills/ubinam ~/.agents/skills/              # Codex, Cursor, Gemini CLI, OpenCode, GitHub Copilot
 ln -s ~/.agents/skills/ubinam ~/.claude/skills/ubinam     # Claude Code
 ```
 
-You need Python 3.10+ and [`uv`](https://docs.astral.sh/uv/). Each script declares its own dependencies and `uv run` installs them on first use. `match.py`, `sat_scan.py` and `prior.py` download PyTorch and their models the first time they run.
+Then just ask your agent “where was this taken?” and attach a photo.
+
+You need Python 3.10+ and [`uv`](https://docs.astral.sh/uv/). Each script declares its own dependencies, and `uv run` installs them the first time. The image-matching scripts (`match.py`, `sat_scan.py`, `prior.py`) download PyTorch and their models on first use.
 
 ## Keys (all optional)
 
-It works without any keys: lookup tables, sun and terrain geometry, OpenStreetMap queries and Sentinel-2 imagery need none. Each key you add unlocks more:
+It works with no keys at all: lookup tables, sun and terrain geometry, OpenStreetMap, historical Esri imagery and Sentinel-2 are free. Each key you add unlocks more:
 
 | Variable | Service | What it unlocks |
 |---|---|---|
-| `ARCGIS_API_KEY` | [ArcGIS Location Platform](https://location.arcgis.com) (free tier) | Recent high-resolution satellite imagery; satellite scans at z17+ |
-| `MAPILLARY_TOKEN` | [Mapillary developers](https://www.mapillary.com/dashboard/developers) (free) | Street-level images worldwide for bulk matching, including many Chinese city roads |
+| `ARCGIS_API_KEY` | [ArcGIS Location Platform](https://location.arcgis.com) (free tier) | Current high-resolution satellite imagery and close-up satellite scans |
+| `MAPILLARY_TOKEN` | [Mapillary developers](https://www.mapillary.com/dashboard/developers) (free) | Street-level images worldwide for bulk matching, including many roads in Chinese cities |
 | `AMAP_KEY` | [AMap Open Platform](https://lbs.amap.com) (choose “Web service”) | Place search in China |
-| `BAIDU_MAP_AK` / `BAIDU_MAP_SK` | [Baidu Maps Open Platform](https://lbsyun.baidu.com) | Place search in China (SK only if your app uses SN signing); the Panorama Static API is a paid add-on |
-| `GOOGLE_MAPS_API_KEY` | [Google Maps Platform](https://developers.google.com/maps) | Small, manual checks with Street View and satellite tiles |
+| `BAIDU_MAP_AK` / `BAIDU_MAP_SK` | [Baidu Maps Open Platform](https://lbsyun.baidu.com) | Place search in China (SK only if your app uses SN signing). Panoramas are a paid add-on |
+| `GOOGLE_MAPS_API_KEY` | [Google Maps Platform](https://developers.google.com/maps) | A few manual Street View and satellite checks |
 
-Run `python3 skills/ubinam/scripts/providers.py list` to see which sources are active and what each licence allows.
+`python3 skills/ubinam/scripts/providers.py list` shows which sources are active and what each licence allows. Ubinam only uses official APIs and openly licensed data. It never scrapes undocumented endpoints.
 
 ## Limits
 
-These are worth knowing before you rely on it:
-
-- **Look-alike structures.** Without text, many bridges, towers and residential blocks have near-twins. Ubinam lists every look-alike candidate before choosing one, but it can still pick the wrong twin.
-- **Street-level coverage stops at the road.** Parks, campuses, lakeshores and residential compounds are rarely covered, so shots taken inside them are confirmed from satellite structure and public photos instead, with lower confidence.
-- **Imagery ages.** A lake that was redeveloped last year can look completely different on older imagery. Before excluding a place, Ubinam looks up when the imagery was captured and checks current photos, but stale data can still mislead.
-- **Blurry text stays blurry.** AI upscaling only makes guessed letters look sharp, so it is not used as evidence. Video helps: `frames.py` aligns and stacks frames, which recovers real extra detail. Single-image denoising is offered only as a viewing aid, because on phone photos it tends to erase fine strokes.
-- **The model can be wrong.** Confidence is reported for each tier so that you can see how far to trust the answer.
+- **Look-alikes.** Without text, many bridges, towers and housing blocks have near-twins. Ubinam lists them all before choosing, but it can still pick the wrong twin.
+- **Street-level imagery stops at the road.** Parks, campuses, lakeshores and residential compounds are rarely covered, so shots taken inside them get lower confidence.
+- **Imagery ages.** A lake redeveloped last year can look nothing like the satellite image. Ubinam checks when each image was captured before ruling a place out, but stale data can still mislead.
+- **Blurry text stays blurry.** AI upscaling invents strokes, so it never counts as evidence. Video is different: stacking frames recovers real detail, and Ubinam does that.
 
 ## Responsible use
 
-Use it on your own photos, public scenes, news images, or photos you have permission to analyse. Do not use it to find people who have not agreed to be found. When a photo shows a private person's home or current whereabouts and the goal is to locate that person, the skill stops at city level. It locates photos; it does not infer where a person lives from a set of their photos.
+Use it on your own photos, public scenes, news images, or photos you have permission to analyse. Don't use it to find people who don't want to be found. When a photo shows a private person's home or current whereabouts and the aim is to locate that person, the skill stops at city level. It locates photos. It does not work out where someone lives from a set of their pictures.
 
 ## Based on geo-sleuth
 
-Ubinam builds on [**geo-sleuth**](https://github.com/Oldcircle/geo-sleuth) by Oldcircle (MIT), imported with its full commit history. The core method comes from that project: the candidate board, rules enforced in code, “scripts rank, the model judges”, and skyline and pier-spacing geometry. Ubinam replaces its undocumented Google, Baidu and 360 endpoints with official or openly licensed sources, and adds China place search, album-wide constraints, street-level parallax bracketing, capture-time estimation without shadows, GeoCLIP and MegaLoc, quick mode, and regression cases.
+Ubinam builds on [**geo-sleuth**](https://github.com/Oldcircle/geo-sleuth) by Oldcircle (MIT), imported with its full commit history. The core method comes from that project: the candidate board, rules enforced in code, “scripts rank, the model judges”, and skyline and pier-spacing geometry. Ubinam replaces its undocumented Google, Baidu and 360 endpoints with official or openly licensed sources. It adds China place search, album-wide constraints, camera pinning on a road, capture dating with historical imagery and Sentinel-2, multi-frame text recovery, GeoCLIP and MegaLoc, a quick mode, and regression cases.
 
 ## Licence and credits
 
