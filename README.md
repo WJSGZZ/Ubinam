@@ -2,7 +2,7 @@
 
 # Ubinam
 
-**Show your agent a photo. It works out where it was taken, and when, and shows you the proof.**
+**Where was this photo taken? Ubinam finds out, and tells you exactly how sure it is.**
 
 *Ubinam* is Latin for “where, exactly?”
 
@@ -12,14 +12,14 @@
 
 ---
 
-Most AI geolocation gives you one confident guess. Ubinam works like an investigator. It reads every sign in the frame, lists every place that could fit, checks the best candidates against satellite imagery, street-level photos, elevation data and maps, and keeps only what holds up.
+Some photos can be pinned to within tens of metres. Others only to a city. That depends on what is in the frame and on how much map data exists for that place, and no tool can promise more than that. Ubinam goes as far as the evidence allows, then stops and tells you why.
 
 What you get back:
 
-- **Coordinates with an error radius**: “within 30 m”, not just a city name.
-- **A confidence level for each step**: country, city, street, building and floor, each judged separately.
+- **Coordinates with an honest error radius**: tens of metres when a readable sign and street-level imagery agree, a whole district when all there is to go on is a skyline.
+- **A confidence level for each step**: country, city, street, building and floor are judged separately, so a shaky building guess doesn't drag down a solid street.
 - **The evidence**: annotated satellite images and side-by-side comparisons, each tied to a command that actually ran.
-- **An honest stop**: if the photo only supports “somewhere in this district”, that is the answer, along with what it would need to go further.
+- **What's missing**: when it can't go further, it says what kind of photo or data would get it there.
 
 It is an [Agent Skill](https://agentskills.io): a folder of instructions and plain Python scripts. It works in Claude Code, Codex, Cursor, Gemini CLI, OpenCode and any agent that can read `SKILL.md` and run shell commands.
 
@@ -34,6 +34,20 @@ Real photos. The answer was frozen before the truth was revealed.
 | A sunset over the sea, no text anywhere | Matched the coastline's shape to find the right bay and island |
 | An album of 14 photos from one city | Pinned **12 of them** on one map and reported the other two as unplaced rather than guessing. A restaurant name **reflected in the water** in one night shot then cracked a separate lake photo that had no signs at all |
 | A cable-stayed bridge at dusk, no text | **Wrong by about 190 km**: it picked the wrong one of several look-alike bridges. We list our misses too |
+
+## How precise, realistically
+
+From our test cases so far (a small sample, so treat these as rough):
+
+| What the photo gives it | What to expect |
+|---|---|
+| A readable shop sign or street name, in a city with street-level imagery | The street, often the building: tens of metres |
+| Several landmarks it can identify on a map (a window view, a skyline) | The camera position: tens of metres |
+| A distinctive natural shape (coastline, mountain ridge) but no text | The right bay or valley; the exact spot is looser |
+| A generic scene: a park path, a housing estate, a lakeshore | The district at best |
+| A look-alike structure with no text | It can be wrong by a long way, as with the 190 km bridge |
+
+**Where the photo was taken matters as much as what's in it.** Street-level imagery, building outlines and building heights are far more complete in much of Europe and North America than in most of China. Google Street View doesn't cover mainland China, Baidu's panoramas follow city roads only, and many buildings have no recorded height or floor count. Small towns are harder everywhere: fewer photos online, fewer mapped buildings, older satellite imagery.
 
 ## What it can do
 
