@@ -8,21 +8,21 @@
 
 *Day to day, use the skill subcommands (`terrain.py scan / ridge / fit`, `imgprep.py piers`, `geo.py spacing`) instead of these scripts; the subcommands were checked against these scripts on the same photo.*
 
-方法本身已写进 skill 文档：`skills/geo-sleuth/references/corridors.md` 4.3（线状设施 × 地形扫描）和 `references/geometry.md` 7.4、7.7（天际线批量打分、等间距构件反解机位）。
+方法本身已写进 skill 文档：`skills/ubinam/references/corridors.md` 4.3（线状设施 × 地形扫描）和 `references/geometry.md` 7.4、7.7（天际线批量打分、等间距构件反解机位）。
 
-*The method itself is documented in the skill: `skills/geo-sleuth/references/corridors.md` section 4.3 (linear feature × terrain scan) and `references/geometry.md` sections 7.4 and 7.7 (batch skyline scoring, camera position from equally spaced structures).*
+*The method itself is documented in the skill: `skills/ubinam/references/corridors.md` section 4.3 (linear feature × terrain scan) and `references/geometry.md` sections 7.4 and 7.7 (batch skyline scoring, camera position from equally spaced structures).*
 
 ## 依赖 / Dependencies
 
-脚本通过 `sys.path` 引用仓库里的 `skills/geo-sleuth/scripts/terrain.py`（`DEM`、`_dest_np`、`_fetch`），所以要在这个仓库的目录结构里运行；用 `uv run <脚本>`，依赖写在文件头。高程切片走 AWS Terrain Tiles，缓存在当前目录的 `.geo-cache/dem/`。
+脚本通过 `sys.path` 引用仓库里的 `skills/ubinam/scripts/terrain.py`（`DEM`、`_dest_np`、`_fetch`），所以要在这个仓库的目录结构里运行；用 `uv run <脚本>`，依赖写在文件头。高程切片走 AWS Terrain Tiles，缓存在当前目录的 `.geo-cache/dem/`。
 
-*The scripts import `terrain.py` from `skills/geo-sleuth/scripts/` in this repository via `sys.path`, so they must stay inside this repository layout. Run them with `uv run <script>`; dependencies are declared in each file header. Elevation tiles come from AWS Terrain Tiles and are cached under `.geo-cache/dem/` in the working directory.*
+*The scripts import `terrain.py` from `skills/ubinam/scripts/` in this repository via `sys.path`, so they must stay inside this repository layout. Run them with `uv run <script>`; dependencies are declared in each file header. Elevation tiles come from AWS Terrain Tiles and are cached under `.geo-cache/dem/` in the working directory.*
 
 ## 输入文件 / Input files
 
-输入数据不在仓库里。两个 geojson 都是用 `skills/geo-sleuth/scripts/osm.py geom` 对 Overpass 做的铁路桥查询，其余输入是上一步脚本的输出。
+输入数据不在仓库里。两个 geojson 都是用 `skills/ubinam/scripts/osm.py geom` 对 Overpass 做的铁路桥查询，其余输入是上一步脚本的输出。
 
-*Input data is not in the repository. Both geojson files were produced by railway-bridge Overpass queries through `skills/geo-sleuth/scripts/osm.py geom`; the other inputs are outputs of the previous step.*
+*Input data is not in the repository. Both geojson files were produced by railway-bridge Overpass queries through `skills/ubinam/scripts/osm.py geom`; the other inputs are outputs of the previous step.*
 
 | 脚本 / Script | 输入 / Input | 输出 / Output |
 |---|---|---|

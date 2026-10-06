@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["pillow", "numpy", "torch", "transformers", "opencv-python-headless", "socksio", "pysocks", "requests"]
+# dependencies = ["pillow", "numpy", "torch", "torchvision", "transformers", "huggingface_hub", "safetensors", "certifi", "opencv-python-headless", "socksio", "pysocks", "requests"]
 # ///
 """照片 vs 一批候选实景图（街景渲染图、卫星缩略图、参考图）的相似度排名：机器先排，人只看前几名。
 
@@ -15,8 +15,11 @@
 
 候选来源三选一：
   --images <目录或glob>                          现成图片，文件名当 id
-  --items <.index.json> --render baidu|gsv      baidu_pano.py sheet/sample 或 gsv.py sheet 写出的 index，逐项渲染
-  --panos panos.json --toward lat,lon | --headings 0,60,…   baidu_pano.py scan 的输出，按朝向渲染（可加 --within、--spread）
+  --items <.index.json> --render mapillary|baidu|gsv   mapillary.py / baidu_pano.py / gsv.py sheet 写出的 index，逐项渲染
+  --panos panos.json --toward lat,lon | --headings 0,60,…   mapillary.py scan 或 baidu_pano.py scan 的输出，按朝向渲染（可加 --within、--spread）
+
+街景来源与许可：批量比对首选 Mapillary（CC BY-SA，允许缓存与视觉分析）；百度、Google 官方接口不缓存、单次各有上限
+（150 / 60 张），只适合几十个候选的小范围确认。
 
 打分：
   全局描述子 DINOv2（facebook/dinov2-small，CLS+patch均值）或 CLIP（openai/clip-vit-base-patch32）余弦相似度；
@@ -50,7 +53,8 @@ from PIL import Image, ImageDraw
 sys.path.insert(0, str(Path(__file__).parent))
 import geo  # noqa: E402
 
-MODELS = {"dino": "facebook/dinov2-small", "clip": "openai/clip-vit-base-patch32"}
+MODELS = {"dino": "facebook/dinov2-small", "clip": "openai/clip-vit-base-patch32",
+          "megaloc": "gmberton/MegaLoc:5fe0dd697c4a70ba3e23607f6716ab3c606b16db"}  # MIT；钉在已审阅的提交上，升级前先读 hubconf.py
 
 
 def _proxy_env(proxy: str | None) -> None:
@@ -96,7 +100,16 @@ class Embedder:
         self.dev = _device()
         t0 = time.time()
         try:
-            self.model = (CLIPModel if method == "clip" else AutoModel).from_pretrained(MODELS[method]).to(self.dev).eval()
+            if method == "megaloc":
+                try:  # python.org 版 Python 常缺根证书，torch.hub 下载会报 CERTIFICATE_VERIFY_FAILED
+                    import certifi
+                    os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+                except ImportError:
+                    pass
+                # 专门的视觉地点识别（VPR）模型，输出 8448 维 L2 归一化描述子；第一次会下载约 1 GB 权重
+                self.model = torch.hub.load(MODELS[method], "get_trained_model", trust_repo=True).to(self.dev).eval()
+            else:
+                self.model = (CLIPModel if method == "clip" else AutoModel).from_pretrained(MODELS[method]).to(self.dev).eval()
         except Exception as e:  # noqa: BLE001
             sys.exit(f"模型 {MODELS[method]} 加载失败：{str(e)[:300]}\n"
                      f"国内下载要代理：--proxy socks5h://127.0.0.1:10808（示例）（或 export GEO_PROXY）；"
@@ -106,14 +119,15 @@ class Embedder:
 
     def _views(self, im: Image.Image, multi: bool) -> list[Image.Image]:
         im = im.convert("RGB")
-        vs = [im.resize((224, 224), Image.BICUBIC)]
+        S = 322 if self.method == "megaloc" else 224
+        vs = [im.resize((S, S), Image.BICUBIC)]
         if multi:
             w, h = im.size
             s = min(w, h)
-            vs.append(im.crop(((w - s) // 2, (h - s) // 2, (w + s) // 2, (h + s) // 2)).resize((224, 224), Image.BICUBIC))
+            vs.append(im.crop(((w - s) // 2, (h - s) // 2, (w + s) // 2, (h + s) // 2)).resize((S, S), Image.BICUBIC))
             # 左右两半：街景和照片视角错开时，重叠的那一半更像
-            vs.append(im.crop((0, 0, int(w * 0.6), h)).resize((224, 224), Image.BICUBIC))
-            vs.append(im.crop((int(w * 0.4), 0, w, h)).resize((224, 224), Image.BICUBIC))
+            vs.append(im.crop((0, 0, int(w * 0.6), h)).resize((S, S), Image.BICUBIC))
+            vs.append(im.crop((int(w * 0.4), 0, w, h)).resize((S, S), Image.BICUBIC))
         return vs
 
     def embed(self, ims: list[Image.Image], multi: bool = False, batch: int = 32) -> np.ndarray:
@@ -124,7 +138,9 @@ class Embedder:
         with self.torch.no_grad():
             for i in range(0, len(flat), batch):
                 chunk = flat[i:i + batch]
-                if self.method == "clip":
+                if self.method == "megaloc":
+                    f = self.model(_tensor(chunk, IMNET, self.torch).to(self.dev))
+                elif self.method == "clip":
                     x = _tensor(chunk, CLIPN, self.torch).to(self.dev)
                     f = _feat(self.model.get_image_features(pixel_values=x))
                 else:
@@ -169,6 +185,7 @@ def sift_inliers(a: Image.Image, b: Image.Image, max_side: int = 1024) -> tuple[
 def _items_from_panos(args) -> list[dict]:
     import baidu_pano as bp
     panos = json.loads(Path(args.panos).read_text(encoding="utf-8"))
+    is_mly = bool(panos) and "is_pano" in next(iter(panos.values()))
     if args.within:
         wl, wo, wr = (float(v) for v in args.within.split(","))
         panos = {k: v for k, v in panos.items() if geo.distance((wl, wo), tuple(v["wgs"])) <= wr}
@@ -182,24 +199,40 @@ def _items_from_panos(args) -> list[dict]:
         if heads is None:
             sys.exit("--panos 需要 --toward 或 --headings")
         for hd in heads:
-            items.append({"id": pid, "heading": hd % 360, "pitch": args.pitch, "fov": args.fov, "wgs": v["wgs"],
-                          "road": v.get("road", ""), "date": v.get("date", "")})
+            hd %= 360
+            if is_mly:
+                import mapillary
+                if not mapillary.usable(v, hd, 45):
+                    continue
+                items.append({"id": pid, "heading": hd, "pitch": 0, "fov": 90, "wgs": v["wgs"], "date": v.get("date", ""),
+                              "meta": v, "engine": "mapillary"})
+            else:
+                items.append({"id": pid, "heading": hd, "pitch": args.pitch, "fov": args.fov, "wgs": v["wgs"],
+                              "road": v.get("road", ""), "date": v.get("date", ""), "engine": "baidu"})
     return items
 
 
 def _render_items(items: list[dict], engine: str, proxy: str | None, cache: Path) -> list[Image.Image | None]:
-    if engine == "gsv":
+    if engine == "mapillary":
+        import mapillary
+        def one(it):
+            try:
+                return mapillary.render(it.get("meta") or it["id"], it["heading"], it.get("pitch", 0), it.get("fov", 90),
+                                        640, 480, proxy)
+            except Exception:  # noqa: BLE001
+                return None
+    elif engine == "gsv":
         import gsv
         def one(it):
             try:
-                return gsv.render(it["id"], it["heading"], it.get("pitch", 0), it.get("fov", 90), 640, 480, proxy, cache / "gsv")
+                return gsv.render(it["id"], it["heading"], it.get("pitch", 0), it.get("fov", 90), 640, 480, proxy)
             except Exception:  # noqa: BLE001
                 return None
     else:
         import baidu_pano as bp
         def one(it):
             try:
-                return bp.render(it["id"], it["heading"], it.get("pitch", 10), it.get("fov", 80), cache=cache / "pano")
+                return bp.render(it["id"], it["heading"], it.get("pitch", 10), it.get("fov", 90))
             except Exception:  # noqa: BLE001
                 return None
     with ThreadPoolExecutor(12) as ex:
@@ -233,7 +266,9 @@ def _load_candidates(args) -> tuple[list[dict], list[Image.Image]]:
             how = "只取前"
         print(f"候选 {len(items)} 张，超过 --max-candidates {args.max_candidates}，{how} {args.max_candidates} 张（先用 --within/--spread 缩）", file=sys.stderr)
         items = items[: args.max_candidates]
-    engine = args.render or ("gsv" if items and str(items[0].get("id", "")).startswith(("CAoS", "CIHM")) or len(str(items[0].get("id", ""))) == 22 else "baidu")
+    first = items[0] if items else {}
+    engine = args.render or first.get("engine") or ("mapillary" if "meta" in first else
+                                                   "baidu" if str(first.get("id", "")).startswith("loc:") else "gsv")
     ims = _render_items(items, engine, args.proxy, cache)
     ok_items, ok_ims = [], []
     for it, im in zip(items, ims):
@@ -241,7 +276,7 @@ def _load_candidates(args) -> tuple[list[dict], list[Image.Image]]:
             ok_items.append(it)
             ok_ims.append(im)
     if not ok_ims:
-        sys.exit("一张候选都没渲染出来：百度全景要直连，Google 街景要代理；看 id 是否正确")
+        sys.exit("一张候选都没渲染出来：检查对应密钥（MAPILLARY_TOKEN / BAIDU_MAP_AK / GOOGLE_MAPS_API_KEY）；百度要直连，Google 在国内要代理")
     if len(ok_ims) < len(items):
         print(f"{len(items) - len(ok_ims)} 张渲染失败已跳过", file=sys.stderr)
     return ok_items, ok_ims
@@ -342,19 +377,20 @@ def main() -> None:
     r.add_argument("--query", required=True)
     r.add_argument("--query-box", help="x0,y0,x1,y1 只比这一块")
     r.add_argument("--images")
-    r.add_argument("--items", help="baidu_pano.py / gsv.py 的 .index.json")
-    r.add_argument("--render", choices=["baidu", "gsv"], help="--items 用哪个引擎渲染；不给按 id 形状猜")
+    r.add_argument("--items", help="mapillary.py / baidu_pano.py / gsv.py 的 .index.json")
+    r.add_argument("--render", choices=["mapillary", "baidu", "gsv"], help="--items 用哪个引擎渲染；不给按 index 里的 engine 或 id 形状判断")
     r.add_argument("--spread-headings", help="--items 每项额外朝向偏移，如 -30,0,30")
-    r.add_argument("--panos", help="baidu_pano.py scan 的输出")
+    r.add_argument("--panos", help="mapillary.py scan 或 baidu_pano.py scan 的输出")
     r.add_argument("--toward", help="lat,lon")
     r.add_argument("--headings")
     r.add_argument("--offset", type=float, default=0)
     r.add_argument("--within", help="lat,lon,半径米")
     r.add_argument("--spread", type=float, help="抽稀间距米")
     r.add_argument("--pitch", type=float, default=10)
-    r.add_argument("--fov", type=float, default=80)
+    r.add_argument("--fov", type=float, default=90)
     r.add_argument("--max-candidates", type=int, default=400)
-    r.add_argument("--method", choices=["dino", "clip", "both"], default="dino")
+    r.add_argument("--method", choices=["dino", "clip", "megaloc", "both"], default="dino",
+                   help="megaloc：专门的地点识别模型，同一地点不同视角/年份更稳；第一次下载约 1 GB")
     r.add_argument("--refine", choices=["none", "sift"], default="sift")
     r.add_argument("--refine-top", type=int, default=30)
     r.add_argument("--min-inliers", type=int, default=15)
@@ -366,7 +402,7 @@ def main() -> None:
 
     i = sub.add_parser("index")
     i.add_argument("--images", required=True)
-    i.add_argument("--method", choices=["dino", "clip"], default="dino")
+    i.add_argument("--method", choices=["dino", "clip", "megaloc"], default="dino")
     i.add_argument("--out", required=True)
     i.add_argument("--proxy", default=argparse.SUPPRESS)
 

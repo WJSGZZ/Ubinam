@@ -37,6 +37,7 @@ from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).parent))
 import geo  # noqa: E402
+import providers  # noqa: E402
 import tiles  # noqa: E402
 
 CLIP_ID = "openai/clip-vit-base-patch32"
@@ -69,18 +70,10 @@ def _proxy_env(proxy: str | None) -> None:
 
 
 def cell_image(lat: float, lon: float, zoom: int, size: int, source: str, proxy: str | None, cache: Path) -> Image.Image:
-    """以 (lat, lon) 为中心拼一张 size×size 的卫星图（复用切片缓存）。"""
+    """以 (lat, lon) 为中心拼一张 size×size 的卫星图。"""
     gx, gy = geo.ll2px(zoom, lat, lon)
-    x0, y0 = gx - size / 2, gy - size / 2
     tile = Image.new("RGB", (size, size), "gray")
-    for tx in range(int(x0 // 256), int((x0 + size) // 256) + 1):
-        for ty in range(int(y0 // 256), int((y0 + size) // 256) + 1):
-            p = cache / f"{source}_{zoom}_{tx}_{ty}.jpg"
-            if tiles._get(tiles.SOURCES[source].format(x=tx, y=ty, z=zoom), p, proxy):
-                try:
-                    tile.paste(Image.open(p), (int(tx * 256 - x0), int(ty * 256 - y0)))
-                except Exception:  # noqa: BLE001
-                    pass
+    tiles.paste_tiles(tile, gx - size / 2, gy - size / 2, size, size, zoom, source, proxy, cache)
     return tile
 
 
@@ -89,12 +82,13 @@ def prefetch(points: dict, zoom: int, size: int, source: str, proxy: str | None,
     for lat, lon in points.values():
         gx, gy = geo.ll2px(zoom, lat, lon)
         x0, y0 = gx - size / 2, gy - size / 2
-        for tx in range(int(x0 // 256), int((x0 + size) // 256) + 1):
-            for ty in range(int(y0 // 256), int((y0 + size) // 256) + 1):
+        for tx in range(int(x0 // 256), int((x0 + size - 1) // 256) + 1):
+            for ty in range(int(y0 // 256), int((y0 + size - 1) // 256) + 1):
                 need.add((tx, ty))
-    cache.mkdir(parents=True, exist_ok=True)
+    if not providers.IMAGERY[source].cache:
+        return  # 许可不允许缓存：不预取，逐格取图时进临时目录
     with ThreadPoolExecutor(16) as ex:
-        list(ex.map(lambda t: tiles._get(tiles.SOURCES[source].format(x=t[0], y=t[1], z=zoom), cache / f"{source}_{zoom}_{t[0]}_{t[1]}.jpg", proxy), need))
+        list(ex.map(lambda t: providers.fetch_tile(source, zoom, t[0], t[1], cache, proxy), need))
 
 
 CLIPN = ([0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711])
@@ -221,6 +215,7 @@ def run(points: dict, args) -> None:
     if not pos:
         sys.exit("给 --preset 或 --query")
     t0 = time.time()
+    providers.require(args.source, "sat_scan 批量扫描", bulk=True)
     prefetch(points, args.zoom, args.size, args.source, args.proxy, cache)
     names = list(points)
     with ThreadPoolExecutor(8) as ex:
@@ -285,7 +280,8 @@ def main() -> None:
         sp.add_argument("--cols", type=int, default=5)
         sp.add_argument("--out")
         sp.add_argument("--sheet")
-        sp.add_argument("--source", choices=list(tiles.SOURCES), default="google")
+        sp.add_argument("--source", choices=[k for k, v in providers.IMAGERY.items() if v.bulk],
+                        default=providers.default_imagery(), help="只列许可允许批量扫描的影像源（google 不在内）")
         sp.add_argument("--proxy", default=os.environ.get("GEO_PROXY"))
         sp.add_argument("--cache", type=Path, default=Path(".geo-cache/tiles"))
 

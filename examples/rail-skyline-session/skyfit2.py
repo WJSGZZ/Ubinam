@@ -14,7 +14,7 @@ D 左段 [-27°,-12°] 天际线 < 1°
 import json, math, sys
 from pathlib import Path
 import numpy as np
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/geo-sleuth/scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/ubinam/scripts"))
 import terrain  # noqa
 
 Z = 11

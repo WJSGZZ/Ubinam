@@ -8,8 +8,9 @@
 拼好的图旁边会写一个同名 .json（缩放级别、左上角切片号、中心点），
 evidence.py 和 mark 子命令靠它把经纬度换成图上像素。
 
-默认用 Google 卫星图（WGS84，和 GPS 同一坐标系，国内不用纠偏）。
-国内网络访问 Google 需要代理：--proxy socks5h://127.0.0.1:10808（示例） 或设环境变量 GEO_PROXY。
+影像源见 providers.py（`providers.py list`）：有 ARCGIS_API_KEY 默认用 Esri，否则用 Sentinel-2（10 米，免密钥）；
+--source google 走官方 Map Tiles API（需 GOOGLE_MAPS_API_KEY，不缓存、单次 ≤200 张）。都是 WGS84 墨卡托瓦片，国内不用纠偏。
+拼图旁的 .json 记下影像源和署名，证据图照写。
 
 示例：
   tiles.py fetch 22.6050,114.0540 --zoom 18 --radius 4 --out area.jpg
@@ -35,21 +36,24 @@ from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).parent))
 import geo  # noqa: E402
-
-SOURCES = {
-    "google": "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
-    "esri": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-}
+import providers  # noqa: E402
 
 
-def _get(url: str, path: Path, proxy: str | None) -> bool:
-    if path.exists() and path.stat().st_size > 1000:
-        return True
-    cmd = ["curl", "-s", "-m", "60", "-o", str(path), url]
-    if proxy:
-        cmd[1:1] = ["-x", proxy]
-    subprocess.run(cmd, check=False)
-    return path.exists() and path.stat().st_size > 1000
+def paste_tiles(img: Image.Image, x0: float, y0: float, size_w: int, size_h: int, zoom: int, source: str,
+                proxy: str | None, cache: Path) -> int:
+    """把覆盖 [x0, x0+size_w) × [y0, y0+size_h)（全球像素坐标）的瓦片贴进 img，返回失败张数。"""
+    failed = 0
+    for tx in range(int(x0 // 256), int((x0 + size_w - 1) // 256) + 1):
+        for ty in range(int(y0 // 256), int((y0 + size_h - 1) // 256) + 1):
+            p = providers.fetch_tile(source, zoom, tx, ty, cache, proxy)
+            if not p:
+                failed += 1
+                continue
+            try:
+                img.paste(Image.open(p), (int(tx * 256 - x0), int(ty * 256 - y0)))
+            except Exception:  # noqa: BLE001
+                failed += 1
+    return failed
 
 
 def fetch(center: tuple[float, float], zoom: int, radius: int, out: Path, source: str,
@@ -61,11 +65,12 @@ def fetch(center: tuple[float, float], zoom: int, radius: int, out: Path, source
     ys = range(cy - radius, cy + radius + 1)
     jobs = [(x, y) for x in xs for y in ys]
 
+    providers.require(source)
+
     def job(t):
         x, y = t
-        p = cache / f"{source}_{zoom}_{x}_{y}.jpg"
-        ok = _get(SOURCES[source].format(x=x, y=y, z=zoom), p, proxy)
-        return t, p, ok
+        p = providers.fetch_tile(source, zoom, x, y, cache, proxy)
+        return t, p, bool(p)
 
     img = Image.new("RGB", (256 * len(xs), 256 * len(ys)), "black")
     failed = 0
@@ -80,6 +85,7 @@ def fetch(center: tuple[float, float], zoom: int, radius: int, out: Path, source
                 failed += 1
     img.save(out, quality=90)
     meta = {"zoom": zoom, "origin_tile": [xs[0], ys[0]], "center": list(center), "source": source,
+            "attribution": providers.attribution([source]),
             "size": list(img.size), "m_per_px": geo.meters_per_px(zoom, center[0]), "failed_tiles": failed}
     out.with_suffix(".json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta
@@ -188,7 +194,7 @@ def grid_points(bbox: str, zoom: int, size: int, step: float | None) -> dict:
 
 def sheet(points: dict, zoom: int, size: int, cols: int, out: Path, source: str, proxy: str | None, cache: Path) -> list[Path]:
     """每个候选点居中出一张 size×size 的卫星缩略图，带编号和名字，拼成一页（多了自动分页）。"""
-    cache.mkdir(parents=True, exist_ok=True)
+    providers.require(source)
     items = list(points.items())
     per = cols * cols
     pages = []
@@ -201,14 +207,7 @@ def sheet(points: dict, zoom: int, size: int, cols: int, out: Path, source: str,
             gx, gy = geo.ll2px(zoom, ll[0], ll[1])
             x0, y0 = gx - size / 2, gy - size / 2
             tile = Image.new("RGB", (size, size), "gray")
-            for tx in range(int(x0 // 256), int((x0 + size) // 256) + 1):
-                for ty in range(int(y0 // 256), int((y0 + size) // 256) + 1):
-                    p = cache / f"{source}_{zoom}_{tx}_{ty}.jpg"
-                    if _get(SOURCES[source].format(x=tx, y=ty, z=zoom), p, proxy):
-                        try:
-                            tile.paste(Image.open(p), (int(tx * 256 - x0), int(ty * 256 - y0)))
-                        except Exception:  # noqa: BLE001
-                            pass
+            paste_tiles(tile, x0, y0, size, size, zoom, source, proxy, cache)
             cx, cy = (k % cols) * size, (k // cols) * size
             S.paste(tile, (cx, cy))
             c = size / 2
@@ -217,6 +216,7 @@ def sheet(points: dict, zoom: int, size: int, cols: int, out: Path, source: str,
             dr.rectangle([cx, cy, cx + size, cy + 20], fill="black")
             dr.text((cx + 4, cy + 3), f"#{pi + k + 1} {str(name)[:28]}", fill="yellow")
         o = out if pi == 0 else out.with_name(f"{out.stem}_{pi // per + 1}{out.suffix}")
+        dr.text((4, S.height - 14), providers.attribution([source])[:160], fill="white")
         S.save(o, quality=88)
         pages.append(o)
     return pages
@@ -237,7 +237,7 @@ def main() -> None:
     f.add_argument("--zoom", type=int, default=18, help="17≈1.1m/px 看片区，19≈0.28m/px 看单栋楼")
     f.add_argument("--radius", type=int, default=4, help="中心切片向外扩几圈，4 → 9x9 切片")
     f.add_argument("--out", type=Path, required=True)
-    f.add_argument("--source", choices=list(SOURCES), default="google")
+    f.add_argument("--source", choices=list(providers.IMAGERY), default=providers.default_imagery())
     f.add_argument("--proxy", default=os.environ.get("GEO_PROXY"))
     f.add_argument("--cache", type=Path, default=Path(".geo-cache/tiles"))
 
@@ -258,7 +258,7 @@ def main() -> None:
     sh.add_argument("--size", type=int, default=320, help="每格像素")
     sh.add_argument("--cols", type=int, default=4, help="每页 cols×cols 格")
     sh.add_argument("--out", type=Path, required=True)
-    sh.add_argument("--source", choices=list(SOURCES), default="google")
+    sh.add_argument("--source", choices=list(providers.IMAGERY), default=providers.default_imagery())
     sh.add_argument("--proxy", default=os.environ.get("GEO_PROXY"))
     sh.add_argument("--cache", type=Path, default=Path(".geo-cache/tiles"))
 

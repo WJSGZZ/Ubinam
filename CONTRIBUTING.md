@@ -4,11 +4,11 @@ Thanks for looking. Three kinds of contribution help most; each has a short rule
 
 ## 1. A clue that transfers
 
-`skills/geo-sleuth/references/clues/china.md` and `global.md` hold the clues the model reads while looking at a photo. Add one when it tells a place apart from its neighbours and you can point at a source (a public table, an official page, a photo you took). One landmark is not a clue; a bus livery that only one city uses is.
+`skills/ubinam/references/clues/china.md` and `global.md` hold the clues the model reads while looking at a photo. Add one when it tells a place apart from its neighbours and you can point at a source (a public table, an official page, a photo you took). One landmark is not a clue; a bus livery that only one city uses is.
 
 ## 2. A data source
 
-Lookup tables live in `skills/geo-sleuth/data/`. Every file carries `_meta` with the source URL, fetch date, row count and licence, and `clues.py update` must be able to re-fetch it. Live queries (OSM, tiles, panoramas) go into a script with a `--proxy` flag and an entry in `references/data-sources.md`.
+Lookup tables live in `skills/ubinam/data/`. Every file carries `_meta` with the source URL, fetch date, row count and licence, and `clues.py update` must be able to re-fetch it. Live queries (OSM, tiles, panoramas) must use an official API or openly licensed data — never an undocumented endpoint. Imagery sources are registered in `scripts/providers.py` with their key, caching, bulk and licence terms filled in honestly; every source also gets an entry in `references/data-sources.md` and a `--proxy` flag.
 
 ## 3. A run that went wrong
 

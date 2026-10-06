@@ -17,7 +17,7 @@ import json, math, sys
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/geo-sleuth/scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/ubinam/scripts"))
 import terrain  # noqa
 
 Z = 10

@@ -12,7 +12,7 @@
 import json, math, sys
 import numpy as np
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/geo-sleuth/scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/ubinam/scripts"))
 import terrain
 
 LEFT = [39, 133, 219, 296, 369]

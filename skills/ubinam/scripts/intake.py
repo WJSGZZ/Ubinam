@@ -12,12 +12,13 @@ intake.md 是给人（和 LLM）看的：元数据、OCR 文字、百度相似�
 识图截图和相似图拼图务必打开看；"没搜到"和"没搜"在报告里分开写。
 
   intake.py photo.jpg --out-dir intake/ [--box x0,y0,x1,y1 ...] [--engines baidu,yandex] [--exclude 词1,词2]
-            [--no-rev] [--no-ocr] [--max-variants 4] [--proxy socks5://127.0.0.1:10808（示例）]
+            [--rev] [--no-ocr] [--max-variants 4] [--proxy socks5://127.0.0.1:10808（示例）]
 
 示例：
   intake.py photo.jpg --out-dir intake/
   intake.py photo.jpg --out-dir intake/ --box 300,120,900,760 --exclude 网络迷踪,某博主      # 盲测时排除讲解帖
-  intake.py photo.jpg --out-dir intake/ --no-rev                                              # 只要元数据、边缘图、OCR（30 秒内）
+  intake.py photo.jpg --out-dir intake/                                                       # 默认：元数据、边缘图、OCR（30 秒内），不上传照片
+  intake.py photo.jpg --out-dir intake/ --rev                                                 # 加以图搜图：照片会上传到百度、Yandex，先征得用户同意
 """
 from __future__ import annotations
 
@@ -128,7 +129,8 @@ def main() -> None:
     ap.add_argument("--box", action="append", help="x0,y0,x1,y1：紧裁变体，可重复")
     ap.add_argument("--engines", default="baidu,yandex")
     ap.add_argument("--exclude", help="以图搜图结果里排除的词（盲测用）")
-    ap.add_argument("--no-rev", action="store_true")
+    ap.add_argument("--rev", action="store_true", help="做以图搜图：会把照片和裁剪图上传到第三方搜索引擎（自动化访问网页，条款风险由使用者承担），先征得用户同意")
+    ap.add_argument("--no-rev", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--no-ocr", action="store_true")
     ap.add_argument("--max-variants", type=int, default=4, help="每个引擎最多搜几张变体（原图之外）")
     ap.add_argument("--proxy", default=os.environ.get("GEO_PROXY"))
@@ -190,6 +192,7 @@ def main() -> None:
     # 第二批：以图搜图，两个引擎并行，各搜原图 + 最多 max-variants 张变体
     rev_dir = out / "rev"
     entries, votes = [], {"city": {}, "place": {}}
+    args.no_rev = not args.rev
     if not args.no_rev:
         rev_dir.mkdir(exist_ok=True)
         var_files = sorted((out / "variants").glob("*.jpg")) + sorted((out / "variants").glob("*.png"))
@@ -240,7 +243,7 @@ def main() -> None:
         L.append("没读到文字" + (f"（OCR {status.get('ocr')}）" if status.get("ocr") != "ok" else "。可能是真没字，也可能字太小：用 imgprep.py zoom 手动放大再看"))
     L += ["", "## 以图搜图", ""]
     if args.no_rev:
-        L.append("没做（--no-rev）。这不是“搜过无果”。")
+        L.append("没做（默认不上传；需要时加 --rev）。这不是“搜过无果”。")
     else:
         for eng in args.engines.split(","):
             st = status.get(f"rev-{eng}", "未跑")

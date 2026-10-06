@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ubinam 图片定位"
+  short_description: "从照片线索逐级推断国家、城市到机位经纬度，并用数据核验"
+  default_prompt: "Use $ubinam to work out where this photo was taken, as precisely as the evidence allows, with tiered confidence and an error radius."

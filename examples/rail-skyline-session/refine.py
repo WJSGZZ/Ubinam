@@ -11,7 +11,7 @@
 import json, math, sys
 from pathlib import Path
 import numpy as np
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/geo-sleuth/scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/ubinam/scripts"))
 import terrain  # noqa
 
 lat0, lon0 = map(float, sys.argv[1].split(","))

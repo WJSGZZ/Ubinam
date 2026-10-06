@@ -24,6 +24,9 @@
 以图搜图前先用 `imgprep.py variants` 做紧裁 / 翻转 / 去色偏几个版本，逐个搜——整图搜不到很正常。
 依赖本机 Google Chrome（没有就先 `uvx playwright install chromium`）。
 
+注意：本脚本用无头浏览器自动访问公开搜索页面，并把图片上传给对方。这些网站的服务条款通常不允许自动化访问，
+是否使用、能否上传这张照片由使用者自行判断；涉及他人面孔、私人住处的照片先征得同意。没有官方免费以图搜图接口可替代。
+
 示例：
   revimg.py photo.jpg --out-dir rev/
   revimg.py v/left_crop.jpg v/left_flip.jpg --out-dir rev/ --engines baidu

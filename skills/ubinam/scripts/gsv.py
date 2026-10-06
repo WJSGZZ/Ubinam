@@ -3,17 +3,20 @@
 # requires-python = ">=3.10"
 # dependencies = ["pillow"]
 # ///
-"""Google 街景（国外主力）：找点、看日期和周边点、按朝向出图、拼对比图。用法和 baidu_pano.py 对齐。
+"""Google 街景（官方 Street View Static API）：找点、按朝向出图、拼对比图。用法和 baidu_pano.py 对齐。
 
-用的是 Google 地图网页自己调用的接口，不需要 key。国内必须走代理（--proxy 或 GEO_PROXY）。
-国内几乎没有 Google 街景覆盖，国内照片用 baidu_pano.py。
+需要环境变量 GOOGLE_MAPS_API_KEY（Google Cloud 控制台开通 Street View Static API）。元数据查询免费不计额度，出图按次计费。
+条款限制（Google Maps Platform 3.2.3）：不得批量下载、不得缓存、不得与非 Google 地图混用。所以本脚本：
+  - 不写持久缓存，图只放进进程临时目录，退出即删；你自己保存的 --out 文件仅供本次人工比对；
+  - 单次进程最多出 60 张图；大范围批量比对改用 mapillary.py（开放许可）；
+  - 官方接口只给每处最新一批全景，没有历史批次和邻点链，--date 不再支持。
+国内几乎没有 Google 街景覆盖，国内照片用 baidu_pano.py；国内网络访问需代理（--proxy 或 GEO_PROXY）。
 
 示例：
-  gsv.py near 35.6595,139.7005 --radius 50                   # 最近的全景点：id、坐标、拍摄日期、历史批次、地址、周边点
-  gsv.py render XlVh96-Z9lAI5tKrU2O4Yg --heading 90 --out v.jpg
+  gsv.py near 35.6595,139.7005 --radius 50                   # 最近的全景点：id、坐标、拍摄年月
+  gsv.py render <pano_id> --heading 90 --out v.jpg
   gsv.py sheet --at 35.6595,139.7005 --headings 0,60,120,180,240,300 --out around.jpg   # 单点环视
-  gsv.py sheet --ids ID1,ID2 --toward 35.6600,139.7010 --out s.jpg                     # 每个点朝向同一目标
-  gsv.py sheet --points pts.json --heading 90 --date 2018 --out s2018.jpg              # 只取某一批次（照片里街景水印的年份）
+  gsv.py sheet --points pts.json --toward 35.6600,139.7010 --out s.jpg                  # 每个点朝向同一目标
 """
 from __future__ import annotations
 
@@ -23,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -30,19 +34,23 @@ from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).parent))
 import geo  # noqa: E402
+import providers  # noqa: E402
 from baidu_pano import _font  # noqa: E402
 
-UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
-# 只要官方街景车覆盖（用户上传的全景照片 id 形如 CIHM0og…，透视图接口出不了图）
-META = ("https://maps.googleapis.com/maps/api/js/GeoPhotoService.SingleImageSearch?pb=!1m5!1sapiv3!5sUS!11m2!1m1!1b0"
-        "!2m4!1m2!3d{lat}!4d{lon}!2d{radius}!3m10!2m2!1sen!2sUS!9m1!1e2!11m4!1m3!1e2!2b1!3e2"
-        "!4m6!1e1!1e2!1e3!1e4!1e8!1e6&callback=cb")
-THUMB = ("https://streetviewpixels-pa.googleapis.com/v1/thumbnail?panoid={id}&cb_client=maps_sv.tactile"
-         "&w={w}&h={h}&yaw={yaw:.1f}&pitch={pitch:.1f}&thumbfov={fov:.0f}")
+API = "https://maps.googleapis.com/maps/api/streetview"
+MAX_RENDERS = 60
+_renders = 0
+
+
+def _key() -> str:
+    k = os.environ.get("GOOGLE_MAPS_API_KEY")
+    if not k:
+        sys.exit("gsv.py 需要环境变量 GOOGLE_MAPS_API_KEY（官方 Street View Static API）。没有密钥可用 mapillary.py。")
+    return k
 
 
 def _curl(url: str, proxy: str | None, out: Path | None = None) -> bytes:
-    cmd = ["curl", "-s", "-m", "40", "-A", UA]
+    cmd = ["curl", "-s", "-m", "40", "-A", providers.UA]
     if proxy:
         cmd += ["-x", proxy]
     if out:
@@ -52,72 +60,35 @@ def _curl(url: str, proxy: str | None, out: Path | None = None) -> bytes:
 
 
 def near(lat: float, lon: float, radius: float, proxy: str | None) -> dict | None:
-    t = _curl(META.format(lat=lat, lon=lon, radius=radius), proxy).decode("utf-8", "replace")
-    m = re.search(r"cb\(\s*(.*)\s*\)\s*;?\s*$", t, re.S)
-    if not m:
+    """官方元数据接口（免费）：最近的官方全景点。"""
+    q = urllib.parse.urlencode({"location": f"{lat},{lon}", "radius": int(radius), "source": "outdoor", "key": _key()})
+    try:
+        d = json.loads(_curl(f"{API}/metadata?{q}", proxy) or b"{}")
+    except json.JSONDecodeError:
         return None
-    try:
-        d = json.loads(m.group(1))
-        body = d[1]
-    except (json.JSONDecodeError, IndexError, TypeError):
+    if d.get("status") != "OK":
+        if d.get("status") not in ("ZERO_RESULTS", "NOT_FOUND"):
+            print(f"Street View 元数据：{d.get('status')} {d.get('error_message', '')}", file=sys.stderr)
         return None
-    out: dict = {}
-    try:
-        out["id"] = body[1][1]
-        loc = body[5][0][1]
-        out["wgs"] = [loc[0][2], loc[0][3]]
-        out["pano_heading"] = round(loc[2][0], 1) if loc[2] else None
-    except (IndexError, TypeError):
-        return None
-    try:
-        out["address"] = " / ".join(x[0] for x in body[3][2])
-    except (IndexError, TypeError):
-        out["address"] = ""
-    # 本全景的拍摄日期在 body[6][7]；body[5][0][8] 是历史批次 [邻点序号, [年, 月(, 日)]]，别拿它当本全景日期
-    try:
-        out["date"] = _ym(body[6][7])
-    except (IndexError, TypeError):
-        out["date"] = None
-    nbrs = []
-    try:
-        for e in body[5][0][3][0]:
-            nbrs.append({"id": e[0][1], "wgs": [e[2][0][2], e[2][0][3]]})
-    except (IndexError, TypeError):
-        pass
-    hist = []
-    try:
-        for idx, ym, *_ in body[5][0][8] or []:
-            # 历史批次里会混进用户上传的全景（透视图出灰图）：id 以 CIHM0og/CIAB/CAoS 开头，长度 22–28 位不等
-            pid = nbrs[idx]["id"] if idx < len(nbrs) else ""
-            if len(pid) == 22 and not pid.startswith(("CIHM", "CIAB", "CAoS")):
-                hist.append({**nbrs[idx], "date": _ym(ym)})
-    except (IndexError, TypeError, ValueError):
-        pass
-    out["history"] = sorted(hist, key=lambda h: h["date"], reverse=True)
-    out["dates_seen"] = sorted({d for d in [out["date"], *(h["date"] for h in hist)] if d})
-    out["neighbors"] = nbrs[:40]
-    return out
-
-
-def _ym(v: list) -> str:
-    return f"{v[0]}-{int(v[1]):02d}"
-
-
-def pick_date(res: dict, date: str) -> dict | None:
-    """near() 的结果里挑某一批次（'2018' 或 '2018-07'）：本全景或历史批次里第一个匹配的；没有返回 None。"""
-    for p in [{"id": res["id"], "wgs": res["wgs"], "date": res["date"]}, *res.get("history", [])]:
-        if p["date"] and p["date"].startswith(date):
-            return p
-    return None
+    loc = d.get("location") or {}
+    return {"id": d.get("pano_id"), "wgs": [loc.get("lat"), loc.get("lng")], "date": d.get("date"),
+            "copyright": d.get("copyright", "© Google")}
 
 
 def render(pid: str, heading: float, pitch: float, fov: float, w: int, h: int, proxy: str | None,
-           cache: Path) -> Image.Image:
-    """heading 罗盘方位；pitch 正=抬头；fov 水平视角。"""
-    cache.mkdir(parents=True, exist_ok=True)
-    p = cache / f"{pid}_{heading:.0f}_{pitch:.0f}_{fov:.0f}_{w}x{h}.jpg"
+           cache: Path | None = None) -> Image.Image:
+    """heading 罗盘方位；pitch 正=抬头；fov 水平视角（官方上限 120）。不做持久缓存。"""
+    global _renders
+    _renders += 1
+    if _renders > MAX_RENDERS:
+        sys.exit(f"gsv.py 单次最多出 {MAX_RENDERS} 张图（条款禁止批量下载）；批量比对改用 mapillary.py")
+    w, h = min(int(w), 640), min(int(h), 640)
+    q = urllib.parse.urlencode({"pano": pid, "size": f"{w}x{h}", "heading": f"{heading % 360:.1f}",
+                                "pitch": f"{pitch:.1f}", "fov": f"{min(fov, 120):.0f}", "return_error_code": "true",
+                                "key": _key()})
+    p = providers._tmpdir() / f"gsv_{pid}_{heading:.0f}_{pitch:.0f}_{fov:.0f}_{w}x{h}.jpg"
     if not (p.exists() and p.stat().st_size > 2000):
-        _curl(THUMB.format(id=pid, w=w, h=h, yaw=heading % 360, pitch=-pitch, fov=fov), proxy, p)
+        _curl(f"{API}?{q}", proxy, p)
     try:
         return Image.open(p).convert("RGB")
     except Exception:  # noqa: BLE001
@@ -149,7 +120,7 @@ def _neg_coords(argv: list[str]) -> list[str]:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--proxy", default=os.environ.get("GEO_PROXY"))
-    ap.add_argument("--cache", type=Path, default=Path(".geo-cache/gsv"))
+    ap.add_argument("--cache", type=Path, default=None, help="已停用：条款不允许缓存街景")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     def common(sp):
@@ -167,8 +138,8 @@ def main() -> None:
     r.add_argument("--heading", type=float, required=True)
     r.add_argument("--pitch", type=float, default=0, help="正=抬头")
     r.add_argument("--fov", type=float, default=90, help="水平视角")
-    r.add_argument("--width", type=int, default=1024)
-    r.add_argument("--height", type=int, default=768)
+    r.add_argument("--width", type=int, default=640, help="官方上限 640")
+    r.add_argument("--height", type=int, default=640, help="官方上限 640")
     r.add_argument("--out", type=Path, required=True)
 
     s = sub.add_parser("sheet")
@@ -185,17 +156,14 @@ def main() -> None:
     s.add_argument("--pitch", type=float, default=0)
     s.add_argument("--fov", type=float, default=90)
     s.add_argument("--radius", type=float, default=50)
-    s.add_argument("--date", help="只取这一批次（2018 或 2018-07），从本全景和历史批次里挑；照片里的街景水印年份就用它")
     s.add_argument("--limit", type=int, default=12)
     s.add_argument("--out", type=Path, required=True)
 
     args = ap.parse_args(_neg_coords(sys.argv[1:]))
-    if not args.proxy:
-        print("提示：国内访问 Google 街景需要 --proxy socks5h://127.0.0.1:10808（示例）", file=sys.stderr)
     if args.cmd == "near":
         lat, lon = map(float, args.latlon.split(","))
         res = near(lat, lon, args.radius, args.proxy)
-        print(json.dumps(res, ensure_ascii=False, indent=1) if res else "附近没有 Google 街景（加大 --radius，或这里没覆盖）")
+        print(json.dumps(res, ensure_ascii=False, indent=1) if res else "附近没有官方 Google 街景（加大 --radius，或这里没覆盖；可试 mapillary.py）")
     elif args.cmd == "render":
         render(args.id, args.heading, args.pitch, args.fov, args.width, args.height, args.proxy, args.cache).save(args.out)
         print(args.out)
@@ -207,13 +175,7 @@ def main() -> None:
             pts = {"at": list(map(float, args.at.split(",")))} if args.at else json.loads(args.points.read_text(encoding="utf-8"))
             for name, (la, lo) in pts.items():
                 res = near(la, lo, args.radius, args.proxy)
-                if res and args.date:
-                    p = pick_date(res, args.date)
-                    if not p:
-                        print(f"{name}: 没有 {args.date} 批次（有 {', '.join(res['dates_seen'])}）", file=sys.stderr)
-                        continue
-                    panos.setdefault(p["id"], {"ll": p["wgs"], "name": name, "date": p["date"]})
-                elif res:
+                if res:
                     panos.setdefault(res["id"], {"ll": res["wgs"], "name": name, "date": res.get("date") or ""})
                 else:
                     print(f"{name}: 附近没有全景", file=sys.stderr)
