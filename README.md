@@ -80,7 +80,7 @@ These are worth knowing before you rely on it:
 - **Look-alike structures.** Without text, many bridges, towers and residential blocks have near-twins. Ubinam lists every look-alike candidate before choosing one, but it can still pick the wrong twin.
 - **Street-level coverage stops at the road.** Parks, campuses, lakeshores and residential compounds are rarely covered, so shots taken inside them are confirmed from satellite structure and public photos instead, with lower confidence.
 - **Imagery ages.** A lake that was redeveloped last year can look completely different on older imagery. Before excluding a place, Ubinam looks up when the imagery was captured and checks current photos, but stale data can still mislead.
-- **Blurry text stays blurry.** AI upscaling only makes guessed letters look sharp, so it is not used as evidence. Video helps, because several frames together contain real extra detail.
+- **Blurry text stays blurry.** AI upscaling only makes guessed letters look sharp, so it is not used as evidence. Video helps: `frames.py` aligns and stacks frames, which recovers real extra detail. Single-image denoising is offered only as a viewing aid, because on phone photos it tends to erase fine strokes.
 - **The model can be wrong.** Confidence is reported for each tier so that you can see how far to trust the answer.
 
 ## Responsible use

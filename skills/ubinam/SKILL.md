@@ -45,6 +45,8 @@ description: 照片拍摄地点定位（看图找地点 / 网络迷踪 / 图寻 
 | 一组照片 | 先定位有字的几张划范围，再回头查难的（`references/verify.md`“同一组照片互相约束”） |
 | 有候选点，要看现状 | `tiles.py fetch --zoom 17–19`（Esri 高清，近年影像）；比 Google 网页卫星图新，排除前先看它 |
 | 候选地点可能改造过、或想知道照片是哪年拍的 | `wayback.py meta`（这里的卫星图哪天拍的）、`changes / sheet`（Esri 历代影像，2014 起，免密钥）：看楼、桥、岸线哪一版出现或消失；排除候选前先 meta 看影像是不是早于改造 |
+| 有视频或连拍、字模糊 | `frames.py stack`（多帧对齐叠加，结果可当 read 级；单图 AI 超分不行） |
+| 要按“画面里同框的几样东西”在地图上找 | `references/osm-tags.md` 查标签 → `osm.py near`；国内点状地物 OSM 漏标多，改用 `poi.py` |
 | 要把时间推到月份（施工、湖岸改造、农田季相） | `s2time.py sheet --monthly`（Sentinel-2，2017 起约 5 天一景，免密钥，10 米） |
 | 有候选点，要看地面 | 国外 `mapillary.py scan`（国内城市主干道也常有 2024 年全景）→ `match.py`；国内再加百度网页版全景人工看；公园、校园、湖边内部搜游客照和效果图 |
 | 认出一栋楼，不知道名字 | OSM 周边楼名 + `poi.py` 周边 POI，再搜各楼外观照片逐栋比 |
