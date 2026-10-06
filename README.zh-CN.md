@@ -19,9 +19,9 @@
 ## 为什么用 Ubinam
 
 - **核对，而不是猜。** 每个“已核实”都必须对应一条实际跑过的命令和它产出的文件；排除要有证据；误差半径小于 100 米必须有两条独立约束。候选盘由脚本强制执行，防止模型挑“长得像的地方里最有名的那个”。
-- **靠几何，不靠感觉。** 能从 EXIF 或消失点求焦距，拿地平线当尺量距离和高度，用卫星图上的影子比楼高，用三个以上已知地标反解机位，用多张街景的视差把拍摄点夹到路上某一段，用高程数据渲染山脊天际线，比对海岸线形状，计算太阳位置。
+- **靠几何，不靠感觉。** 能从 EXIF 或消失点求焦距，拿地平线当尺量距离和高度，用卫星图上的影子比楼高，用三个以上已知地标反解机位，用三个地物的视差把拍摄点夹到路上某一段，用高程数据渲染山脊天际线，比对海岸线形状，计算太阳位置。
 - **整组照片一起看。** 先定位有招牌、好认的几张，划出范围，再回头查难的那张；所有拍摄点可以标在同一张卫星图上，按把握从高到低排列。
-- **也能推拍摄时间。** 有影子用太阳几何算；没有影子就看有日期的证据：节日布置、施工进度、历史天气、天色和人流。Esri Wayback 提供 2014 年以来每一版卫星图和每张影像的真实拍摄日期，某栋楼首次出现在哪一版，就能给拍摄年份定区间。几何算出的结论和常识推断分开写。
+- **也能推拍摄时间。** 有影子用太阳几何算；没有影子就看有日期的证据：节日布置、施工进度、历史天气、天色和人流。Esri Wayback 提供 2014 年以来每一版卫星图和每张影像的真实拍摄日期，某栋楼首次出现在哪一版，就能给拍摄年份定区间；Sentinel-2 约 5 天一景，能把施工、改造推到月份。几何算出的结论和常识推断分开写。
 - **为中国准备好了。** 内置高德、百度地点检索，WGS84、GCJ-02、BD-09 坐标互转，车牌、区号、文字等查表，以及没有 Google 街景时用百度全景的流程。
 - **数据来源干净。** 只用官方接口或开放许可的数据：Esri 和 Sentinel-2 影像、Mapillary（CC BY-SA）、OpenStreetMap，以及用你自己密钥调用的百度、高德、Google 官方接口。不抓取任何未公开接口。
 - **自带第二意见。** [GeoCLIP](https://github.com/VicenteVivan/geo-clip) 只凭画面给出独立的粗略位置，[MegaLoc](https://github.com/gmberton/MegaLoc) 用视觉地点识别给街景候选排序。
@@ -95,5 +95,5 @@ Ubinam 以 Oldcircle 的 [**geo-sleuth**](https://github.com/Oldcircle/geo-sleut
 
 - 代码：MIT，见 [LICENSE](LICENSE)。Copyright © 2026 Oldcircle（geo-sleuth）及 © 2026 Xik（Ubinam 的修改）。
 - `skills/ubinam/data/` 里源自维基百科的查表数据为 CC BY-SA 4.0，详见 [`data/README.md`](skills/ubinam/data/README.md)。行政区划数据来自 [modood/Administrative-divisions-of-China](https://github.com/modood/Administrative-divisions-of-China)。
-- 实时数据各有许可，发布结果时请署名：© OpenStreetMap contributors（ODbL）；Sentinel-2 cloudless by EOX（CC BY 4.0）；© Mapillary contributors（CC BY-SA 4.0）；Esri、Google、百度、高德数据按各自服务条款；AWS Terrain Tiles。
+- 实时数据各有许可，发布结果时请署名：© OpenStreetMap contributors（ODbL）；Sentinel-2 cloudless by EOX（CC BY 4.0）；Contains modified Copernicus Sentinel data（经 Element84 Earth Search）；© Mapillary contributors（CC BY-SA 4.0）；Esri、Google、百度、高德数据按各自服务条款；AWS Terrain Tiles。
 - 模型：DINOv2（Meta AI）、CLIP（OpenAI）、[GeoCLIP](https://github.com/VicenteVivan/geo-clip)（MIT）、[MegaLoc](https://github.com/gmberton/MegaLoc)（MIT）。

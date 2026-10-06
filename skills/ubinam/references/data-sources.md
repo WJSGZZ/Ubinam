@@ -9,6 +9,7 @@
 | `revimg.py` | 百度识图 + Yandex 以图搜图；`--query` 中文关键词搜索（必应国内版、百度/搜狗图片）。**自动化访问公开网页并上传图片，默认不用，用户同意后才跑** | 百度、必应直连；Yandex 可能要代理 |
 | `geo.py` | 坐标系换算、方位距离、相机几何（`range --hfov a:b` 距离区间）、`line` 对齐线、`intersect` 视线交会、`frame` 排除前算画框和遮挡、`spacing` 等间距构件像素列 × 已知折线反解机位（可选和天际线联合打分） | 仅 `spacing` 取高程切片，直连或代理均可 |
 | `wayback.py` | Esri World Imagery Wayback：同一地点 2014 年以来的历代影像，`meta` 查影像真实拍摄日期、卫星和分辨率，`changes` 只列真正变过的版本，`sheet` 并排拼图；看改造前后、给拍摄年份定上下限 | 免密钥，不缓存 |
+| `s2time.py` | Sentinel-2 L2A 时间序列（Element84 Earth Search，AWS 开放数据）：`list` 列某点各景日期和云量，`sheet --monthly` 每月取一景裁出拼图；把施工、改造、季相推到月份 | 免密钥；Copernicus 数据免费开放，署名 Contains modified Copernicus Sentinel data |
 | `poi.py` | 地名、小区名、楼盘名、店名 → 坐标候选（高德 `AMAP_KEY` + 百度 `BAIDU_MAP_AK` + OSM Nominatim），全国同名点都列出 | 高德、百度直连；Nominatim 国内可能要代理 |
 | `sun.py` | 太阳位置、影长比、`locate` 地带、`when` 时刻、`street` 街道走向、`facing` 受光面定朝向、`dish` 卫星锅 | — |
 | `osm.py` | Overpass：find / near 共现 / crossings 线变点 / route 线路走廊 / intersect 两类线交叉（折角只标注，`--rank-near` 排序）/ street-scan 街景几何模板 / geom 导出几何 | 国内可能要代理 |

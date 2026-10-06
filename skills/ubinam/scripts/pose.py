@@ -11,6 +11,8 @@
   solve    解算机位；输出里带逐点检查（leave_one_out）：每次去掉一个点重解，看它被其余点预测差多少
   check    离散候选机位打分：几处都说得通、要挑一个时用；每个候选只解朝向，逐个去掉一个点再打分，
            稳健Δchi2 > 9（去掉任何一个点都救不回来）才算和照片对不上
+  along    视差夹逼：机位在一条路（折线）上，沿路每隔 --step 米算一个候选打分，给出最优点和 Δchi2 ≤ 4 的路段。
+           3 个以上认得出的地物就能用（近处一个、远处两个最好，左右分开）；知道焦距就 fix hfov，点少时必须固定
   project  已知机位，把一批经纬度点投到照片上（核对河岸、路、楼是否对得上）；
            带 --horizon <海天线行号> 时校验 pitch：目标的俯角不是相机的俯仰角，海天线在画面中心就说明 pitch≈0
 
@@ -32,6 +34,7 @@ spec.json 格式：
 示例：
   pose.py solve spec.json --photo photo.jpg --out pose.png --search-radius 500
   pose.py check spec.json --cands cands.json        # cands.json：{"候选A": [lat, lon], "候选B": [lat, lon, 眼高海拔]}
+  pose.py along spec.json --line 3.0101,101.6801:3.0110,101.6815 --step 5      # 折线 lat,lon:lat,lon:…；眼高用 init.height
   pose.py project --pose pose.json --points river.json --photo photo.jpg --out check.png
 """
 from __future__ import annotations
@@ -285,6 +288,37 @@ def check(spec: dict, cands: dict, px_sigma: float) -> dict:
     return dict(sorted(res.items(), key=lambda kv: (kv[1]["robust_delta_chi2"], kv[1]["delta_chi2"])))
 
 
+def along(spec: dict, line: list[tuple[float, float]], step: float, px_sigma: float) -> dict:
+    """沿折线均匀取候选机位，逐个用 check 打分；返回各点 Δchi2、最优点和 Δchi2 ≤ 4 的连续区间（约 2σ）。"""
+    lat0 = line[0][0]
+    kx, ky = _frame(lat0)
+    cands, dist = {}, {}
+    acc = 0.0
+    for (a0, o0), (a1, o1) in zip(line, line[1:]):
+        seg = math.hypot((o1 - o0) * kx, (a1 - a0) * ky)
+        k = max(1, int(seg // step))
+        for i in range(k + (1 if (a1, o1) == line[-1] else 0)):
+            t = i / k
+            name = f"{acc + t * seg:.0f}m"
+            cands[name] = [a0 + t * (a1 - a0), o0 + t * (o1 - o0)]
+            dist[name] = acc + t * seg
+        acc += seg
+    res = check(spec, cands, px_sigma)
+    order = sorted(cands, key=lambda c: dist[c])
+    best = min(order, key=lambda c: res[c]["delta_chi2"])
+    i0 = i1 = order.index(best)
+    while i0 > 0 and res[order[i0 - 1]]["delta_chi2"] <= 4:
+        i0 -= 1
+    while i1 < len(order) - 1 and res[order[i1 + 1]]["delta_chi2"] <= 4:
+        i1 += 1
+    return {"best": {"name": best, "ll": [round(x, 6) for x in cands[best]], **res[best]},
+            "bracket_m": [round(dist[order[i0]]), round(dist[order[i1]])],
+            "bracket_ll": [[round(x, 6) for x in cands[order[i0]]], [round(x, 6) for x in cands[order[i1]]]],
+            "edge": i0 == 0 or i1 == len(order) - 1,
+            "profile": [{"m": round(dist[c]), "ll": [round(x, 6) for x in cands[c]], "delta_chi2": res[c]["delta_chi2"],
+                         "rms_px": res[c]["rms_px"]} for c in order]}
+
+
 def sanity(pose: dict, pts: list[dict], horizon_row: float | None = None) -> list[str]:
     """报机位前的自洽自检。犯过的错：把画面里某个目标的俯角当成相机的俯仰角填进 pitch，
     以及机位高程和画面俯角对不上却照报（4 m 高差配 7.6° 俯角，差了四倍）。"""
@@ -362,6 +396,12 @@ def main() -> None:
     ck.add_argument("--cands", type=Path, required=True, help='{"候选名": [lat, lon] 或 [lat, lon, 高度]}；不给高度用 init.height')
     ck.add_argument("--px-sigma", type=float, default=5.0, help="像素量测误差，换算 chi2 用")
     ck.add_argument("--save", type=Path, default=Path("pose_check.json"))
+    al = sub.add_parser("along", help="视差夹逼：机位在一条路上，沿路打分给区间")
+    al.add_argument("spec", type=Path)
+    al.add_argument("--line", required=True, help="折线 lat,lon:lat,lon[:…]，沿拍摄者所在的路或人行道画")
+    al.add_argument("--step", type=float, default=5.0, help="候选间距 m")
+    al.add_argument("--px-sigma", type=float, default=5.0)
+    al.add_argument("--save", type=Path, default=Path("pose_along.json"))
     pr = sub.add_parser("project")
     pr.add_argument("--pose", type=Path, required=True)
     pr.add_argument("--points", type=Path, required=True, help='[{"name":…,"ll":[lat,lon],"h":…}] 或 {name:[lat,lon,h]}')
@@ -398,6 +438,23 @@ def main() -> None:
             print(f"{name:24s} rms {v['rms_px']:6.1f} px  Δchi2 {v['delta_chi2']:8.1f}  稳健Δchi2 {v['robust_delta_chi2']:8.1f}（{v['robust_by']}）"
                   f"  朝向 {v['heading']:6.1f}  俯仰 {v['pitch']:5.1f}")
         print(f"-> {args.save}（稳健Δchi2 > 9 才算对不上：去掉任何一个点都救不回来；两个候选只差在某一个点上时，先核那个点）")
+    elif args.cmd == "along":
+        spec = json.loads(args.spec.read_text(encoding="utf-8"))
+        if "hfov" not in spec.get("fix", []) and len(spec["points"]) < 4:
+            print("注意：点少于 4 个且没固定 hfov，焦距和位置会互相抵消；先按 geometry.md 1.5 节定焦距再 fix")
+        line = [tuple(map(float, q.split(","))) for q in args.line.split(":")]
+        out = along(spec, line, args.step, args.px_sigma)
+        args.save.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+        b = out["best"]
+        print(f"最优 {b['name']}  {b['ll'][0]},{b['ll'][1]}  rms {b['rms_px']} px  朝向 {b['heading']}  hfov {b['hfov']}")
+        print(f"Δchi2 ≤ 4 的路段：{out['bracket_m'][0]}–{out['bracket_m'][1]} m（{out['bracket_ll'][0]} → {out['bracket_ll'][1]}）")
+        if out["bracket_m"][0] == out["bracket_m"][1]:
+            print("区间窄于步长：在最优点前后各取一段、把 --step 调小再跑一次")
+        if out["edge"]:
+            print("注意：区间碰到折线端点，真值可能在线外，延长 --line 再跑")
+        if b["rms_px"] > 3 * args.px_sigma:
+            print("注意：最优点的 rms 也很大，可能有地物认错、或机位根本不在这条线上")
+        print(f"-> {args.save}（剖面在 profile 里；区间是像素误差 {args.px_sigma}px 下的估计，量点越准越窄）")
     else:
         pose = json.loads(args.pose.read_text(encoding="utf-8"))
         raw = json.loads(args.points.read_text(encoding="utf-8"))
